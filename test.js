@@ -1,5 +1,5 @@
 // Run: node test.js   (tests the pure logic only)
-global.window = {};
+global.window = { addEventListener() {}, innerWidth: 1000, innerHeight: 800 };
 global.document = {
   documentElement: { append() {} },
   createElement() { return { attachShadow() { return { append() {} }; }, append() {}, setAttribute() {}, addEventListener() {}, nodeType: 1, textContent: '', querySelector() { return null; } }; },
@@ -7,7 +7,7 @@ global.document = {
   createTextNode(t) { return { nodeType: 3, t }; }
 };
 require('./content.js');
-const { parseRef, parseEntry, similarity, compare, buildRows, toCsv, csvCell, slug } = window.__gcs;
+const { parseRef, parseEntry, similarity, compare, buildText, slug } = window.__gcs;
 const eq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) { console.error('FAIL', m, JSON.stringify(a), JSON.stringify(b)); process.exitCode = 1; } else console.log('ok  ', m); };
 const names = (arr, side) => arr.map((x) => (x[side] || x).name || (x[side] || x).key);
 
@@ -62,14 +62,10 @@ eq([amb.exact.length, amb.probable.length], [0, 1], 'duplicate names go to "chec
 const w = compare('100000000001\n100000000002', 'Amina Rahman\nDaniel Okafor');
 eq([w.nameless, w.keylessMembers], [2, 2], 'link-only entries flagged when members have no IDs');
 
-// CSV
-eq(csvCell('a,b'), '"a,b"', 'csv quotes commas');
-eq(csvCell('say "hi"'), '"say ""hi"""', 'csv escapes quotes');
-eq(csvCell('=SUM(A1)'), "'=SUM(A1)", 'csv blocks formulas');
-eq(csvCell('+1 555'), "'+1 555", 'csv blocks leading plus');
-const rows = buildRows(r);
-eq(rows[0], ['Status', 'List entry', 'ID or username', 'Chat member', 'Matched by'], 'csv header');
-eq(rows.slice(1).map((x) => x[0]), ['To add', 'To add', 'Needs a check', 'Not on list', 'Not on list', 'In chat', 'In chat', 'In chat', 'In chat'], 'csv order: to add first, matched last');
-eq(rows.length - 1, r.unmatchedT.length + r.probable.length + r.unmatchedM.length + r.exact.length, 'csv has a row for every result');
-eq(toCsv(rows).startsWith('\ufeffStatus,'), true, 'csv has a BOM so Excel reads accents');
+// text export
+const txt = buildText(r, 'Volunteers', '2026-10-14');
+eq(txt.startsWith('Group Chat Sync: Volunteers\nDate: 2026-10-14'), true, 'text header');
+eq(['TO ADD (2)', 'NEEDS A CHECK (1)', 'NOT ON LIST (2)', 'IN CHAT (4)'].every((x) => txt.includes(x)), true, 'text has all four sections with counts');
+eq(txt.includes('  - Priya Nair') && txt.includes('  - Random Person'), true, 'text lists people');
+eq(buildText(compare('A Person', 'A Person'), 'x', 'd').includes('TO ADD (0)\n----------\n  (nobody)'), true, 'empty section says nobody');
 eq(slug('Class of 2024 – Volunteers!'), 'class-of-2024-volunteers', 'file name slug');

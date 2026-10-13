@@ -6,7 +6,8 @@
  *   3. See who is missing, who needs a double-check, who is all set, and who
  *      is in the chat but not on your list.
  *   4. Your "same person / different people" choices are remembered.
- *   5. Export the results as CSV, or step through the people to add.
+ *   5. Export the results as a text file, or step through the people to add.
+ *   6. Take people out of the "Not listed" table (this only tidies the table).
  *
  * The extension never clicks anything in Messenger. You make every change.
  */
@@ -287,30 +288,30 @@
   }
 
   /* =====================================================================
-   * CSV
+   * Text export
    * ===================================================================== */
 
-  function csvCell(v) {
-    let s = String(v == null ? '' : v);
-    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; // stop spreadsheet formulas
-    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-  }
-
-  function buildRows(r) {
+  function buildText(r, listName, date) {
     const who = (e) => e.name || e.key || '';
-    const by = { id: 'ID', name: 'Name', remembered: 'Remembered choice' };
-    const rows = [['Status', 'List entry', 'ID or username', 'Chat member', 'Matched by']];
-    for (const t of r.unmatchedT) rows.push(['To add', who(t), t.key || '', '', '']);
-    for (const p of r.probable) rows.push(['Needs a check', who(p.t), p.t.key || '', who(p.m), 'Similar name']);
-    for (const m of r.unmatchedM) rows.push(['Not on list', '', m.key || '', who(m), '']);
-    for (const x of r.exact) rows.push(['In chat', who(x.t), x.t.key || '', who(x.m), by[x.how]]);
-    return rows;
+    const withId = (e) => (e.name && e.key ? `${e.name} (${e.key})` : who(e));
+    const by = { id: 'matched by ID', name: 'matched by name', remembered: 'remembered choice' };
+    const out = [];
+    const section = (title, items) => {
+      out.push('', `${title} (${items.length})`, '-'.repeat(title.length + String(items.length).length + 3));
+      if (!items.length) out.push('  (nobody)');
+      else out.push(...items.map((x) => '  - ' + x));
+    };
+    out.push(`Group Chat Sync: ${listName}`, `Date: ${date}`);
+    out.push(`${r.exact.length} of ${r.total} on the list are in the chat; ${r.memberTotal} chat members compared.`);
+    section('TO ADD', r.unmatchedT.map(withId));
+    section('NEEDS A CHECK', r.probable.map((p) => `${who(p.t)}  ~  ${who(p.m)} (similar name)`));
+    section('NOT ON LIST', r.unmatchedM.map(withId));
+    section('IN CHAT', r.exact.map((x) => `${who(x.t)}${who(x.t) !== who(x.m) ? '  =  ' + who(x.m) : ''} (${by[x.how]})`));
+    return out.join('\n') + '\n';
   }
-
-  const toCsv = (rows) => '\ufeff' + rows.map((row) => row.map(csvCell).join(',')).join('\r\n');
 
   function downloadFile(filename, text) {
-    const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -416,13 +417,15 @@
     membersText: '',
     membersSnapshot: '',
     result: null,
+    removed: [], // keys of chat members taken out of the "Not listed" table
     tab: 'add',
     queue: [],
     qi: 0,
     added: 0,
     skipped: 0,
     wait: 0,
-    toast: null
+    toast: null,
+    pos: { fab: null, panel: null } // dragged positions in px ({x,y}) or null for default
   };
 
   const activeList = () => S.lists.find((l) => l.id === S.activeId) || S.lists[0];
@@ -449,6 +452,7 @@
           S.activeId = d.activeId;
           S.decisions = d.decisions || {};
           S.pace = d.pace !== false;
+          if (d.pos) S.pos = { fab: d.pos.fab || null, panel: d.pos.panel || null };
         } else if (r && r[OLD_KEY]) {
           S.lists = [{ id: newId(), name: 'My list', text: r[OLD_KEY] }];
         }
@@ -468,7 +472,7 @@
     saveTimer = setTimeout(() => {
       try {
         store.set({
-          [KEY]: { lists: S.lists, activeId: S.activeId, decisions: S.decisions, pace: S.pace }
+          [KEY]: { lists: S.lists, activeId: S.activeId, decisions: S.decisions, pace: S.pace, pos: S.pos }
         });
       } catch {
         /* ignore */
@@ -527,8 +531,13 @@
    * Actions
    * ===================================================================== */
 
+  const memberKey = (m) => m.key || 'n:' + norm(m.name);
+
   function recompute() {
-    S.result = compare(activeList().text, S.membersSnapshot, S.decisions);
+    const r = compare(activeList().text, S.membersSnapshot, S.decisions);
+    r.removedM = r.unmatchedM.filter((m) => S.removed.includes(memberKey(m)));
+    r.unmatchedM = r.unmatchedM.filter((m) => !S.removed.includes(memberKey(m)));
+    S.result = r;
     if (S.tab === 'check' && !S.result.probable.length) {
       S.tab = S.result.unmatchedT.length ? 'add' : 'ok';
     }
@@ -553,6 +562,7 @@
       return;
     }
     S.error = '';
+    S.removed = [];
     S.membersSnapshot = text;
     S.tab = 'add';
     recompute();
@@ -592,14 +602,36 @@
     render();
   }
 
-  function exportCsv(btn) {
-    const name = `${slug(activeList().name)}-${today()}.csv`;
-    downloadFile(name, toCsv(buildRows(S.result)));
+  function exportText(btn) {
+    const list = activeList();
+    const name = `${slug(list.name)}-${today()}.txt`;
+    downloadFile(name, buildText(S.result, list.name, today()));
     if (btn) flash(btn, 'Saved');
     else {
       toast(`Saved ${name}`);
       render();
     }
+  }
+
+  function removeMembers(ms) {
+    const keys = ms.map(memberKey);
+    S.removed = [...new Set([...S.removed, ...keys])];
+    recompute();
+    toast(`Removed ${ms.length === 1 ? lab(ms[0]) : plural(ms.length, 'person', 'people')} from this table.`, () => {
+      S.removed = S.removed.filter((k) => !keys.includes(k));
+      recompute();
+      S.tab = 'extra';
+      S.toast = null;
+      render();
+    });
+    render();
+  }
+
+  function restoreMembers() {
+    S.removed = [];
+    recompute();
+    toast('Everyone is back in the table.');
+    render();
   }
 
   async function copyText(text, btn, label = 'Copied') {
@@ -619,7 +651,7 @@
   function burst() {
     if (!confettiLayer) return;
     if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    const colors = ['#5b3df5', '#14a37f', '#f0a202', '#e5484d', '#2f9be8'];
+    const colors = ['#e11d2e', '#8b0000', '#111111', '#ffffff', '#ff4d4d'];
     confettiLayer.textContent = '';
     for (let i = 0; i < 36; i++) {
       const c = h('span', { class: 'confetti' });
@@ -928,27 +960,67 @@
   }
 
   function tabExtra(r) {
-    if (!r.unmatchedM.length) return h('p', { class: 'empty' }, 'Everyone in the chat is on your list.');
-    return [
-      h(
-        'p',
-        { class: 'hint' },
-        'These people are in the chat but not on this list. Handy when you tidy up by hand.'
-      ),
-      h('ul', { class: 'people extra' }, r.unmatchedM.map((m) => personRow(m))),
-      h(
-        'div',
-        { class: 'actions left' },
+    const out = [];
+    if (!r.unmatchedM.length) {
+      out.push(
         h(
-          'button',
-          {
-            class: 'btn small',
-            onclick: (e) => copyText(r.unmatchedM.map(lab).join('\n'), e.target, 'Names copied')
-          },
-          'Copy names'
+          'p',
+          { class: 'empty' },
+          r.removedM.length ? 'The table is empty.' : 'Everyone in the chat is on your list.'
         )
-      )
-    ];
+      );
+    } else {
+      out.push(
+        h(
+          'p',
+          { class: 'hint' },
+          'These people are in the chat but not on this list. Remove anyone you want out of this table.'
+        ),
+        h(
+          'ul',
+          { class: 'people extra' },
+          r.unmatchedM.map((m) =>
+            personRow(
+              m,
+              null,
+              h(
+                'button',
+                {
+                  class: 'btn small rm',
+                  'aria-label': `Remove ${lab(m)} from this table`,
+                  onclick: () => removeMembers([m])
+                },
+                'Remove'
+              )
+            )
+          )
+        ),
+        h(
+          'div',
+          { class: 'actions left' },
+          h(
+            'button',
+            {
+              class: 'btn small',
+              onclick: (e) => copyText(r.unmatchedM.map(lab).join('\n'), e.target, 'Names copied')
+            },
+            'Copy names'
+          ),
+          h('button', { class: 'btn small danger', onclick: () => removeMembers(r.unmatchedM) }, 'Remove all')
+        )
+      );
+    }
+    if (r.removedM.length) {
+      out.push(
+        h(
+          'p',
+          { class: 'hint' },
+          `${plural(r.removedM.length, 'person is', 'people are')} hidden. `,
+          h('button', { class: 'link', onclick: restoreMembers }, 'Restore')
+        )
+      );
+    }
+    return out;
   }
 
   function viewReview() {
@@ -1020,7 +1092,7 @@
         'div',
         { class: 'footer' },
         h('button', { class: 'btn small', onclick: () => ((S.view = 'home'), render()) }, 'Edit list'),
-        h('button', { class: 'btn small', onclick: (e) => exportCsv(e.target) }, 'Export CSV'),
+        h('button', { class: 'btn small', onclick: (e) => exportText(e.target) }, 'Download .txt'),
         r.unmatchedT.length
           ? h(
               'button',
@@ -1134,7 +1206,7 @@
       h(
         'div',
         { class: 'footer' },
-        h('button', { class: 'btn small', onclick: (e) => exportCsv(e.target) }, 'Export CSV'),
+        h('button', { class: 'btn small', onclick: (e) => exportText(e.target) }, 'Download .txt'),
         h('button', { class: 'btn primary grow', onclick: runCompare }, 'Re-check the chat')
       )
     ];
@@ -1144,22 +1216,109 @@
    * Shell
    * ===================================================================== */
 
+  /* ---------- Dragging ---------- */
+
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, Math.max(lo, hi)));
+  const FAB_H = 44;
+
+  function fabStyle() {
+    const f = S.pos.fab;
+    if (!f) return null;
+    const x = clamp(f.x, 0, window.innerWidth - 60);
+    const y = clamp(f.y, 0, window.innerHeight - FAB_H);
+    return `left:${x}px;top:${y}px;bottom:auto`;
+  }
+
+  function panelStyle() {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const p = S.pos.panel;
+    if (p) {
+      const x = clamp(p.x, 0, vw - 120);
+      const y = clamp(p.y, 0, vh - 120);
+      return `left:${x}px;top:${y}px;bottom:auto;max-height:${Math.max(160, vh - y - 8)}px`;
+    }
+    const f = S.pos.fab;
+    if (!f) return null;
+    const x = clamp(f.x, 8, vw - 408);
+    const fy = clamp(f.y, 0, vh - FAB_H);
+    if (fy > vh / 2) {
+      return `left:${x}px;top:auto;bottom:${vh - fy + 8}px;max-height:${Math.max(160, Math.min(700, fy - 16))}px`;
+    }
+    const top = fy + FAB_H + 8;
+    return `left:${x}px;top:${top}px;bottom:auto;max-height:${Math.max(160, vh - top - 8)}px`;
+  }
+
+  // Moves an element with the pointer. Uses window listeners so a re-render
+  // (timers, toasts) in the middle of a drag doesn't drop it.
+  function startDrag(e, find, kind) {
+    if (e.button != null && e.button !== 0) return;
+    const el = find();
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const dx = e.clientX - r.left;
+    const dy = e.clientY - r.top;
+    const sx = e.clientX;
+    const sy = e.clientY;
+    let moved = false;
+    const move = (ev) => {
+      if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 4) return;
+      moved = true;
+      const cur = find();
+      if (!cur) return;
+      const w = cur.offsetWidth;
+      const hgt = cur.offsetHeight;
+      const x = clamp(ev.clientX - dx, 0, window.innerWidth - Math.min(w, 120));
+      const y = clamp(ev.clientY - dy, 0, window.innerHeight - Math.min(hgt, kind === 'fab' ? FAB_H : 80));
+      S.pos[kind] = { x, y };
+      cur.setAttribute('style', kind === 'fab' ? fabStyle() : panelStyle());
+      ev.preventDefault();
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', up, true);
+      window.removeEventListener('pointercancel', up, true);
+      if (moved) {
+        persist();
+        render();
+      } else if (kind === 'fab') {
+        S.open = !S.open;
+        render();
+      }
+    };
+    window.addEventListener('pointermove', move, true);
+    window.addEventListener('pointerup', up, true);
+    window.addEventListener('pointercancel', up, true);
+    e.preventDefault();
+  }
+
   const CSS = `
 :host{all:initial}
 *{box-sizing:border-box}
-.root{--ink:#1f2340;--mut:#656a85;--line:#e2def5;--bg:#fff;--soft:#f4f2ff;--pri:#5b3df5;--onpri:#fff;
---add:#0f8a6a;--addbg:#e0f5ee;--chk:#9a6400;--chkbg:#fff1cf;--ext:#4a5070;--extbg:#eceef7;--bad:#c62f35;--badbg:#fde8e8;
+.root{--ink:#111;--mut:#5f5a5c;--line:#e8dcdd;--bg:#fff;--soft:#faf5f5;--pri:#d10f1f;--onpri:#fff;--deep:#7a0010;
+--add:#b00d1b;--addbg:#fde8ea;--chk:#7a0a14;--chkbg:#f3eaea;--ext:#333;--extbg:#ececec;--bad:#b00020;--badbg:#fde8ea;
+--headbg:#111;--headink:#fff;
 color-scheme:light dark;
 font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink)}
-@media (prefers-color-scheme:dark){.root{--ink:#eceeff;--mut:#a3a8c8;--line:#383c68;--bg:#1b1d33;--soft:#25284a;--pri:#8f7bff;--onpri:#12142a;
---add:#6fdcb8;--addbg:#16382f;--chk:#ffcf66;--chkbg:#3d3213;--ext:#b9bfe0;--extbg:#2b2f55;--bad:#ff9a9f;--badbg:#42202a}}
-.fab{position:fixed;left:16px;bottom:16px;z-index:2147483647;display:flex;align-items:center;gap:8px;border:2px solid var(--pri);background:var(--bg);color:var(--ink);font:inherit;font-weight:700;padding:9px 16px 9px 12px;border-radius:999px;cursor:pointer;box-shadow:0 4px 14px rgba(40,30,120,.25)}
-.fab::before{content:"";width:10px;height:10px;border-radius:50%;background:var(--pri)}
+@media (prefers-color-scheme:dark){.root{--ink:#f5f5f5;--mut:#a8a0a2;--line:#3a2326;--bg:#0b0b0c;--soft:#161214;--pri:#ff2b3d;--onpri:#fff;--deep:#8b0000;
+--add:#ff7480;--addbg:#2a1014;--chk:#ffb3ba;--chkbg:#231315;--ext:#cfcfcf;--extbg:#1d1d1f;--bad:#ff8a94;--badbg:#2e1015;--headbg:#000;--headink:#fff}}
+.fab{position:fixed;left:16px;bottom:16px;z-index:2147483647;display:flex;align-items:center;gap:9px;isolation:isolate;border:0;
+background:#050505;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;
+color:#fff;font:inherit;font-weight:700;letter-spacing:.01em;padding:11px 20px 11px 16px;border-radius:999px;cursor:pointer;
+box-shadow:0 0 18px rgba(255,30,45,.45),0 0 42px rgba(139,0,0,.45)}
+.fab::before{content:"";width:9px;height:9px;border-radius:50%;background:#ff2b3d;box-shadow:0 0 8px 2px rgba(255,43,61,.9)}
+.fab .ring{position:absolute;inset:0;border-radius:inherit;padding:2px;overflow:hidden;pointer-events:none;z-index:-1;
+-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;
+mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0)}
+.fab .ring::before{content:"";position:absolute;left:50%;top:50%;width:360px;height:360px;margin:-180px 0 0 -180px;
+background:conic-gradient(from 0deg,#3a0000 0deg,#ff1a2b 35deg,#ff7a70 50deg,#ff1a2b 65deg,#7a0010 110deg,#2a0000 170deg,
+#8b0000 200deg,#ff1a2b 235deg,#ffb0a8 250deg,#ff1a2b 265deg,#7a0010 310deg,#3a0000 360deg)}
+.fab:hover{box-shadow:0 0 24px rgba(255,30,45,.7),0 0 56px rgba(139,0,0,.6)}
 .fab:active,.btn:active{transform:translateY(1px)}
 :focus-visible{outline:2px solid var(--pri);outline-offset:2px}
-.panel{position:fixed;left:16px;bottom:64px;z-index:2147483647;width:400px;max-width:calc(100vw - 32px);max-height:min(700px,calc(100vh - 84px));display:flex;flex-direction:column;background:var(--bg);border:1px solid var(--line);border-radius:18px;box-shadow:0 12px 40px rgba(30,20,100,.3);overflow:hidden}
-.head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--soft);border-bottom:1px solid var(--line);font-weight:800;font-size:15px}
-.x{border:0;background:none;color:var(--mut);font-size:22px;line-height:1;cursor:pointer;padding:0 4px;border-radius:6px}
+.panel{position:fixed;left:16px;bottom:64px;z-index:2147483647;width:400px;max-width:calc(100vw - 32px);max-height:min(700px,calc(100vh - 84px));display:flex;flex-direction:column;background:var(--bg);border:1px solid var(--line);border-radius:18px;box-shadow:0 12px 40px rgba(0,0,0,.4);overflow:hidden}
+.head{cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--headbg);color:var(--headink);border-bottom:3px solid var(--pri);font-weight:800;font-size:15px}
+.x{border:0;background:none;color:#ddd;font-size:22px;line-height:1;cursor:pointer;padding:0 4px;border-radius:6px}
 .body{padding:14px 16px 16px;overflow:auto;position:relative}
 label{display:block;font-weight:700;margin:0}
 .rowhead{display:flex;align-items:center;justify-content:space-between;margin:14px 0 2px;gap:8px}
@@ -1173,11 +1332,11 @@ textarea{font:12.5px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;r
 .headline{font-size:19px;font-weight:800;margin:0 0 8px;letter-spacing:-.01em}
 .summary{font-weight:700;margin:0 0 4px}
 .bar{height:10px;border-radius:999px;background:var(--soft);border:1px solid var(--line);overflow:hidden}
-.fill{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--pri),var(--add));min-width:4px}
+.fill{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--deep),var(--pri));min-width:4px}
 .tabs{display:flex;gap:4px;margin:12px 0 10px;background:var(--soft);padding:4px;border-radius:12px}
 .tab{flex:1;display:flex;align-items:center;justify-content:center;gap:5px;font:inherit;font-weight:700;font-size:12.5px;color:var(--mut);background:none;border:0;border-radius:9px;padding:6px 4px;cursor:pointer;white-space:nowrap}
 .tab .n{font-size:11px;background:var(--line);color:var(--ink);border-radius:999px;padding:0 6px;min-width:18px}
-.tab.on{background:var(--bg);color:var(--ink);box-shadow:0 1px 3px rgba(30,20,100,.18)}
+.tab.on{background:var(--bg);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.25);border-bottom:2px solid var(--pri)}
 .tab.on.add .n{background:var(--addbg);color:var(--add)}
 .tab.on.check .n,.tab.attn .n{background:var(--chkbg);color:var(--chk)}
 .tab.on.extra .n{background:var(--extbg);color:var(--ext)}
@@ -1186,7 +1345,10 @@ textarea{font:12.5px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;r
 .person{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;background:var(--soft);border-left:4px solid var(--line)}
 .people.add .person{border-left-color:var(--add);background:var(--addbg)}
 .people.ok .person{border-left-color:var(--pri)}
-.people.extra .person{border-left-color:var(--ext)}
+.people.extra .person{border-left-color:var(--ink)}
+.btn.rm{padding:3px 10px;font-size:12px}
+.btn.rm:hover,.btn.danger:hover{background:var(--pri);border-color:var(--pri);color:#fff}
+.link{font:inherit;font-weight:700;background:none;border:0;padding:0;color:var(--pri);text-decoration:underline;cursor:pointer}
 .who{flex:1;min-width:0;display:flex;flex-direction:column}
 .who b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .key{font:12px ui-monospace,Menlo,Consolas,monospace;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1214,6 +1376,7 @@ details .people{margin-top:8px}
 .btn.small{padding:5px 12px;font-size:12.5px}
 .btn.big{width:100%;padding:11px 16px;font-size:15px}
 .btn.primary{background:var(--pri);border-color:var(--pri);color:var(--onpri)}
+.btn.primary:hover:not([disabled]){background:var(--deep);border-color:var(--deep)}
 .btn.danger{border-color:var(--bad);color:var(--bad)}
 .btn[disabled]{opacity:.45;cursor:not-allowed}
 .confetti-layer{position:fixed;inset:0;pointer-events:none;z-index:2147483647;overflow:hidden}
@@ -1223,6 +1386,10 @@ details .people{margin-top:8px}
   .fill{animation:grow .7s ease-out}
   @keyframes grow{from{width:0}}
   .panel{animation:pop .16s ease-out}
+  .fab .ring::before{animation:spin 2.6s linear infinite}
+  .fab{animation:flicker 3.2s ease-in-out infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes flicker{0%,100%{filter:brightness(1)}8%{filter:brightness(1.25)}12%{filter:brightness(.95)}45%{filter:brightness(1.1)}52%{filter:brightness(1.3)}56%{filter:brightness(1)}}
   @keyframes pop{from{opacity:0;transform:translateY(8px) scale(.98)}}
 }
 `;
@@ -1252,12 +1419,18 @@ details .people{margin-top:8px}
         'button',
         {
           class: 'fab',
+          style: fabStyle(),
+          title: 'Click to open. Drag to move.',
           'aria-expanded': String(S.open),
-          onclick: () => {
+          onpointerdown: (e) => startDrag(e, () => root.querySelector('.fab'), 'fab'),
+          onclick: (e) => {
+            // Mouse and touch are handled by the pointer events; this is for the keyboard.
+            if (e.detail !== 0) return;
             S.open = !S.open;
             render();
           }
         },
+        h('span', { class: 'ring', 'aria-hidden': 'true' }),
         'Sync members'
       )
     );
@@ -1267,10 +1440,17 @@ details .people{margin-top:8px}
     const body = h('div', { class: 'body' }, views[S.view]());
     const panel = h(
       'section',
-      { class: 'panel', role: 'dialog', 'aria-label': 'Group chat sync' },
+      { class: 'panel', role: 'dialog', 'aria-label': 'Group chat sync', style: panelStyle() },
       h(
         'div',
-        { class: 'head' },
+        {
+          class: 'head',
+          title: 'Drag to move',
+          onpointerdown: (e) => {
+            if (e.target.closest && e.target.closest('.x')) return;
+            startDrag(e, () => root.querySelector('.panel'), 'panel');
+          }
+        },
         TITLES[S.view],
         h('button', { class: 'x', 'aria-label': 'Close', onclick: () => ((S.open = false), render()) }, '\u00d7')
       ),
@@ -1291,8 +1471,12 @@ details .people{margin-top:8px}
     body.scrollTop = keepScroll;
   }
 
+  window.addEventListener('resize', () => {
+    if (S.pos.fab || S.pos.panel) render();
+  });
+
   load(render);
 
   // Exposed for tests and the demo page.
-  window.__gcs = { parseRef, parseEntry, parseList, similarity, compare, buildRows, toCsv, csvCell, slug };
+  window.__gcs = { parseRef, parseEntry, parseList, similarity, compare, buildText, slug };
 })();

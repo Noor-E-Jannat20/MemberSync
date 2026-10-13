@@ -23,19 +23,22 @@ Try it without Facebook: open `demo.html` in Chrome.
 - **Remembered choices:** for close names ("Jon Smith" / "John Smith") you pick
   *Same person* or *Different people* once. It is remembered across lists and sessions,
   works for nicknames ("Bob Chen" = "Robert Chen"), and can be undone or forgotten.
-- **CSV export:** every person with their status (To add, Needs a check, Not on list,
-  In chat), ID, chat name and how they were matched. Opens correctly in Excel.
+- **Movable:** drag the Sync members button or the panel header anywhere on screen; positions
+  are remembered.
+- **Text export:** downloads a plain .txt file with sections for To add, Needs a check,
+  Not on list and In chat.
 - **Guided adding:** steps through the people to add, with profile links, copy buttons
   and an optional pause between adds.
-- There are no remove actions. "Not listed" is a read-only list of people who are in the
-  chat but not on your list, for when you tidy up by hand.
+- **Removing from "Not listed":** each row has a Remove button (plus Remove all, Undo and
+  Restore). This only hides people in the table and in the exported text; it never
+  removes anyone from the Messenger chat.
 
 ## Files
 
     manifest.json   Permissions (storage) and where the script runs
-    content.js      Parsing, matching, CSV, saved data, and the panel UI
+    content.js      Parsing, matching, text export, saved data, and the panel UI
     demo.html       Fake member list to try the panel without Facebook
-    test.js         Node tests for the matching and CSV logic  (node test.js)
+    test.js         Node tests for the matching and export logic  (node test.js)
 
 In content.js, `scrapeMembers` is the only code that depends on Messenger's page
 structure, so it is the part that will need fixing when Facebook changes things.
