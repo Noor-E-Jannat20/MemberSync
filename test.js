@@ -69,3 +69,23 @@ eq(['TO ADD (2)', 'NEEDS A CHECK (1)', 'NOT ON LIST (2)', 'IN CHAT (4)'].every((
 eq(txt.includes('  - Priya Nair') && txt.includes('  - Random Person'), true, 'text lists people');
 eq(buildText(compare('A Person', 'A Person'), 'x', 'd').includes('TO ADD (0)\n----------\n  (nobody)'), true, 'empty section says nobody');
 eq(slug('Class of 2024 – Volunteers!'), 'class-of-2024-volunteers', 'file name slug');
+
+// non-English names
+eq(parseEntry('জান্নাত রহমান').name, 'জান্নাত রহমান', 'Bengali name parses');
+eq(parseEntry('মা') && parseEntry('মা').name, 'মা', 'short Bengali name (letter + vowel sign) is kept');
+eq(parseEntry('अमित शर्मा').name, 'अमित शर्मा', 'Hindi name parses');
+eq(parseEntry('王小明').name, '王小明', 'Chinese name parses');
+eq(parseEntry('محمد علي').name, 'محمد علي', 'Arabic name parses');
+eq(parseEntry('Daniel Okafor | 100000000002'), { key: '100000000002', name: 'Daniel Okafor' }, 'Latin name with ID still parses');
+eq(parseEntry('রাহুল দাস | facebook.com/profile.php?id=100000000009'), { key: '100000000009', name: 'রাহুল দাস' }, 'Bengali name | link');
+eq(similarity('জান্নাত রহমান', 'রহমান জান্নাত'), 1, 'Bengali word order ignored');
+eq(similarity('Елена Петрова', 'елена  ПЕТРОВА'), 1, 'Cyrillic case and spacing ignored');
+eq(similarity('محمد علي', 'علي محمد'), 1, 'Arabic word order ignored');
+eq(similarity('জান্নাত', 'জান‍্নাত'), 1, 'zero-width joiner ignored');
+eq(similarity('রাহুল', 'রুহাল') < 0.8, true, 'Bengali: same letters in a different order are not the same name');
+eq(similarity('王小明', '王小红') < 0.8, true, 'different Chinese names stay apart');
+eq(similarity('王小明', '王小明'), 1, 'same Chinese name matches');
+const bn = compare('জান্নাত রহমান\nরাহুল দাস\nমা', 'রহমান জান্নাত\nঅন্য ব্যক্তি\nমা');
+eq([bn.exact.length, bn.unmatchedT.map((x) => x.name), bn.unmatchedM.map((x) => x.name)], [2, ['রাহুল দাস'], ['অন্য ব্যক্তি']], 'Bengali lists compare correctly');
+eq(slug('বাংলা তালিকা – ২০২৪'), 'বাংলা-তালিকা-২০২৪', 'file name keeps non-English letters');
+eq(buildText(bn, 'বাংলা', 'd').includes('  - রাহুল দাস'), true, 'text export writes non-English names');

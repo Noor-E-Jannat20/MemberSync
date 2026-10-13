@@ -89,6 +89,18 @@ The answer is remembered across lists and sessions. This also covers nicknames, 
 Bob Chen = Robert Chen. You can undo a choice right after making it. Later, open
 **All set > Remembered choices** and press **Forget** to be asked again.
 
+### Names in any language
+Names are read and matched in any script: Bengali, Hindi, Arabic, Chinese, Japanese,
+Korean, Cyrillic, Thai and more. Short names and names with vowel signs work, word order
+is ignored, and right-to-left names display correctly. The text download is UTF-8, so the
+names open correctly in Notepad and other editors.
+
+- Accents are ignored only for Latin letters (Tomás = Tomas). Other scripts are compared
+  exactly, apart from case, spacing, punctuation and invisible joiner characters.
+- Messenger's own labels (such as "Add" or "Admin") are filtered out only in English. If
+  Messenger is set to another language, a few such labels may be read as members. Use
+  **Remove** in **Not listed** to hide them.
+
 ### Reading only the Members list
 The extension does not read the whole screen. On **Check my list** it looks for, in order:
 

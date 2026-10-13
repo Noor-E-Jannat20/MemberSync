@@ -64,14 +64,18 @@
    * Names
    * ===================================================================== */
 
-  const hasLetters = (s) => /\p{L}{2,}/u.test(s);
+  // A letter followed by another letter or a combining mark. Marks matter:
+  // in Bengali, Hindi, Thai and others, vowel signs are marks, not letters.
+  const hasLetters = (s) => /\p{L}[\p{L}\p{M}]/u.test(s);
 
   const norm = (s) =>
     String(s || '')
+      .replace(/[\u200b-\u200d\u2060\ufeff]/g, '') // zero-width joiners and spaces
       .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[\u0300-\u036f]/g, '') // drop Latin accents only
+      .normalize('NFC')
       .toLowerCase()
-      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ') // keep letters, marks, digits
       .replace(/\s+/g, ' ')
       .trim();
 
@@ -311,7 +315,7 @@
   }
 
   function downloadFile(filename, text) {
-    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const blob = new Blob(['\ufeff', text], { type: 'text/plain;charset=utf-8' }); // BOM: old Notepad reads UTF-8
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -327,7 +331,8 @@
     String(s || 'list')
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-zA-Z0-9]+/g, '-')
+      .normalize('NFC')
+      .replace(/[^\p{L}\p{M}\p{N}]+/gu, '-')
       .replace(/^-+|-+$/g, '')
       .toLowerCase() || 'list';
 
@@ -870,6 +875,7 @@
     const textarea = h('textarea', {
       rows: 8,
       spellcheck: 'false',
+      dir: 'auto',
       'aria-label': 'People to check',
       placeholder:
         'Lena Petrova\nDaniel Okafor | facebook.com/profile.php?id=100000000002\nhttps://facebook.com/some.username',
@@ -916,6 +922,7 @@
           h('textarea', {
             rows: 5,
             spellcheck: 'false',
+            dir: 'auto',
             'aria-label': 'Chat members',
             placeholder: 'One member name per line',
             value: S.membersText,
@@ -934,7 +941,7 @@
     return h(
       'li',
       { class: 'person' },
-      h('span', { class: 'who' }, h('b', {}, lab(e)), e.name && e.key ? h('span', { class: 'key' }, e.key) : null),
+      h('span', { class: 'who' }, h('b', { dir: 'auto' }, lab(e)), e.name && e.key ? h('span', { class: 'key' }, e.key) : null),
       tag ? h('span', { class: 'tag' }, tag) : null,
       extra
     );
@@ -947,8 +954,8 @@
       h(
         'div',
         { class: 'pairtxt' },
-        h('div', {}, h('span', { class: 'lbl' }, 'Your list'), h('b', {}, lab(p.t))),
-        h('div', {}, h('span', { class: 'lbl' }, 'In the chat'), h('b', {}, lab(p.m)))
+        h('div', {}, h('span', { class: 'lbl' }, 'Your list'), h('b', { dir: 'auto' }, lab(p.t))),
+        h('div', {}, h('span', { class: 'lbl' }, 'In the chat'), h('b', { dir: 'auto' }, lab(p.m)))
       ),
       h(
         'div',
@@ -1259,7 +1266,7 @@
         'div',
         { class: 'card' },
         h('p', { class: 'lbl' }, 'Add to the chat'),
-        h('p', { class: 'big' }, labFull(item)),
+        h('p', { class: 'big', dir: 'auto' }, labFull(item)),
         h(
           'p',
           { class: 'hint' },
