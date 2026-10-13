@@ -89,6 +89,21 @@ The answer is remembered across lists and sessions. This also covers nicknames, 
 Bob Chen = Robert Chen. You can undo a choice right after making it. Later, open
 **All set > Remembered choices** and press **Forget** to be asked again.
 
+### Reading only the Members list
+The extension does not read the whole screen. On **Check my list** it looks for, in order:
+
+1. an area you picked yourself,
+2. an open Members pop-up,
+3. the section under a "Chat members" / "Members" heading.
+
+The sidebar chat list, the message area and the page header are ignored. The area it read
+flashes with a red outline so you can see what was used.
+
+If it can't find the list, or reads the wrong area, click **Select member list** (under
+the list box), then click any member's name inside the real Members list. Hovering shows a
+red outline of the area that will be used; press Esc to cancel. **Reset** goes back to
+auto-detect. The picked area is remembered until the page reloads or the area leaves the page.
+
 ### Removing people from the "Not listed" table
 Each row has a **Remove** button. **Remove all** clears the table. A message offers **Undo**,
 and a **Restore** link brings back everyone you hid.
@@ -176,6 +191,8 @@ so it is the part to fix if Facebook changes things.
 - **"I couldn't see any chat members":** open the chat's Members list, scroll to the bottom
   and click **Check my list** again. If it still fails, a **Paste the members instead** box
   appears: paste one member name per line there.
+- **Names from outside the member list show up:** click **Select member list** and pick
+  the list yourself (see above). Use **Remove** in **Not listed** to hide any leftovers.
 - **Some members are missing:** the member list loads as you scroll. Scroll to the very
   bottom before checking.
 - **A stray label shows up as a member:** rows without profile links are read by name, so

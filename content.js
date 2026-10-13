@@ -350,10 +350,64 @@
     return s.trim().split(/\s+/).length <= 6;
   }
 
-  // Returns the members as text lines ("key | Name" or just "Name").
+  const ROW_SEL = '[role="listitem"], [role="row"], li';
+  const HEADING_RE = /^(chat members|group members|members|people|participants)(\s*[\u00b7\-:(]?\s*\d+\)?)?$/i;
+
+  // How many person-like rows sit inside an element.
+  function countRows(el) {
+    let links = 0;
+    for (const a of el.querySelectorAll('a[href]')) if (parseRef(a.href)) links++;
+    return Math.max(links, el.querySelectorAll(ROW_SEL).length);
+  }
+
+  // From something the user clicked (or a heading), the smallest surrounding
+  // element that holds at least two rows. That is the list.
+  function listAround(el, minRows = 2) {
+    let cur = el;
+    for (let i = 0; i < 12 && cur && cur !== document.body; i++, cur = cur.parentElement) {
+      if (cur.id === 'gcs-host') return null;
+      if (countRows(cur) >= minRows) return cur;
+    }
+    return null;
+  }
+
+  const inNav = (el) => !!el.closest('[role="navigation"], [role="banner"], nav, header');
+
+  // Finds the Members list instead of reading the whole screen:
+  //   1. an area the user picked,
+  //   2. an open Members dialog,
+  //   3. the section under a "Chat members" / "Members" heading.
+  // Returns null when none is found (the user is then asked to pick it).
+  function findScope() {
+    if (S.scopeEl && S.scopeEl.isConnected) return S.scopeEl;
+    S.scopeEl = null;
+
+    const dialogs = [...document.querySelectorAll('[role="dialog"]')].filter((d) => countRows(d) >= 2);
+    if (dialogs.length) return dialogs[dialogs.length - 1];
+
+    let best = null;
+    let bestN = 0;
+    const cands = document.querySelectorAll('h1,h2,h3,h4,h5,h6,[role="heading"],span,div,button,[role="button"]');
+    for (const el of cands) {
+      if (el.childElementCount > 1) continue;
+      const t = (el.textContent || '').trim();
+      if (t.length > 30 || !HEADING_RE.test(t) || inNav(el)) continue;
+      const area = listAround(el);
+      if (!area) continue;
+      const n = countRows(area);
+      if (n > bestN) {
+        best = area;
+        bestN = n;
+      }
+    }
+    return best;
+  }
+
+  // Returns { text, scope }: the members as text lines ("key | Name" or just
+  // "Name") and the part of the page they were read from.
   function scrapeMembers() {
-    const dialogs = [...document.querySelectorAll('[role="dialog"]')];
-    const scope = dialogs.length ? dialogs[dialogs.length - 1] : document.body;
+    const scope = findScope();
+    if (!scope) return { text: '', scope: null };
     const lines = [];
     const seen = new Set();
     const covered = new Set();
@@ -390,7 +444,7 @@
       if (/^\d+\s+(members?|people|participants?)\b/i.test(parts[0])) continue;
       add(null, parts[0]);
     }
-    return lines.join('\n');
+    return { text: lines.join('\n'), scope };
   }
 
   /* =====================================================================
@@ -424,6 +478,8 @@
     added: 0,
     skipped: 0,
     wait: 0,
+    picking: false,
+    scopeEl: null, // member list area picked by the user (kept while it stays on the page)
     toast: null,
     pos: { fab: null, panel: null } // dragged positions in px ({x,y}) or null for default
   };
@@ -552,14 +608,20 @@
 
   function runCompare() {
     const manual = S.showManual ? S.membersText.trim() : '';
-    const text = manual || scrapeMembers();
+    let text = manual;
     if (!text) {
-      S.error =
-        'I couldn\u2019t see any chat members. Open the chat\u2019s Members list, scroll to the bottom, and try again.';
-      S.showManual = true;
-      S.view = 'home';
-      render();
-      return;
+      const got = scrapeMembers();
+      text = got.text;
+      if (got.scope) highlight(got.scope);
+      if (!text) {
+        S.error = got.scope
+          ? 'I found the area but couldn\u2019t read any names in it. Scroll the Members list to load everyone, or pick the list again.'
+          : 'I couldn\u2019t find the Members list on this page. Click \u201cSelect member list\u201d and then click a name inside it.';
+        S.showManual = true;
+        S.view = 'home';
+        render();
+        return;
+      }
     }
     S.error = '';
     S.removed = [];
@@ -781,6 +843,25 @@
     );
   }
 
+  function areaRow() {
+    if (S.picking) {
+      return h(
+        'div',
+        { class: 'area picking' },
+        h('span', {}, 'Click a name inside the Members list. Press Esc to cancel.'),
+        h('button', { class: 'btn small', onclick: () => (stopPick(), render()) }, 'Cancel')
+      );
+    }
+    const picked = S.scopeEl && S.scopeEl.isConnected;
+    return h(
+      'div',
+      { class: 'area' },
+      h('span', {}, picked ? 'Reading from: the area you picked' : 'Reading from: auto-detected Members list'),
+      h('button', { class: 'btn small', onclick: startPick }, picked ? 'Pick again' : 'Select member list'),
+      picked ? h('button', { class: 'btn small', onclick: () => ((S.scopeEl = null), render()) }, 'Reset') : null
+    );
+  }
+
   function viewHome() {
     const list = activeList();
     const count = () => parseList(list.text, 't').entries.length;
@@ -822,7 +903,8 @@
         'One person per line: a name, a profile link, or both like Name | link. Names alone are fine.'
       ),
       textarea,
-      h('p', { class: 'hint' }, 'Tip: open the chat\u2019s Members list first, so I can see who\u2019s in.')
+      h('p', { class: 'hint' }, 'Tip: open the chat\u2019s Members list first, so I can see who\u2019s in.'),
+      areaRow()
     ];
     if (S.error) out.push(h('p', { class: 'warn' }, S.error));
     if (S.showManual) {
@@ -1216,6 +1298,72 @@
    * Shell
    * ===================================================================== */
 
+  /* ---------- Picking the member list ---------- */
+
+  let hlBox = null;
+  function showBox(el) {
+    if (!hlBox) {
+      hlBox = h('div', { class: 'hl' });
+      shadow.append(hlBox);
+    }
+    if (!el) {
+      hlBox.style.display = 'none';
+      return;
+    }
+    const r = el.getBoundingClientRect();
+    hlBox.setAttribute(
+      'style',
+      `display:block;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px`
+    );
+  }
+  function highlight(el) {
+    showBox(el);
+    setTimeout(() => showBox(null), 1400);
+  }
+
+  function stopPick() {
+    S.picking = false;
+    showBox(null);
+    document.removeEventListener('mousemove', pickMove, true);
+    document.removeEventListener('click', pickClick, true);
+    document.removeEventListener('keydown', pickKey, true);
+  }
+  const inHost = (e) => (e.composedPath ? e.composedPath().includes(host) : false);
+  function pickMove(e) {
+    if (inHost(e)) return showBox(null);
+    showBox(listAround(e.target));
+  }
+  function pickClick(e) {
+    if (inHost(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    const area = listAround(e.target);
+    stopPick();
+    if (area) {
+      S.scopeEl = area;
+      S.error = '';
+      highlight(area);
+      toast('Got it. I\u2019ll read names from that area only.');
+    } else {
+      S.error = 'That doesn\u2019t look like a list of people. Try clicking a member\u2019s name.';
+    }
+    render();
+  }
+  function pickKey(e) {
+    if (e.key === 'Escape') {
+      stopPick();
+      render();
+    }
+  }
+  function startPick() {
+    S.picking = true;
+    document.addEventListener('mousemove', pickMove, true);
+    document.addEventListener('click', pickClick, true);
+    document.addEventListener('keydown', pickKey, true);
+    render();
+  }
+
   /* ---------- Dragging ---------- */
 
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, Math.max(lo, hi)));
@@ -1346,6 +1494,10 @@ textarea{font:12.5px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;r
 .people.add .person{border-left-color:var(--add);background:var(--addbg)}
 .people.ok .person{border-left-color:var(--pri)}
 .people.extra .person{border-left-color:var(--ink)}
+.area{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:8px 0 0;font-size:12.5px;color:var(--mut)}
+.area span{flex:1;min-width:150px}
+.area.picking{color:var(--ink);font-weight:700;background:var(--soft);border:1.5px dashed var(--pri);border-radius:10px;padding:7px 10px}
+.hl{position:fixed;z-index:2147483646;pointer-events:none;display:none;border:2px solid #ff2b3d;background:rgba(255,43,61,.12);border-radius:6px;box-shadow:0 0 14px rgba(255,43,61,.6)}
 .btn.rm{padding:3px 10px;font-size:12px}
 .btn.rm:hover,.btn.danger:hover{background:var(--pri);border-color:var(--pri);color:#fff}
 .link{font:inherit;font-weight:700;background:none;border:0;padding:0;color:var(--pri);text-decoration:underline;cursor:pointer}
