@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Group Chat Sync: demo page</title>
+<style>
+  body{font:15px system-ui,sans-serif;max-width:520px;margin:40px auto;padding:0 16px}
+  [role=dialog]{border:1px solid #ccc;border-radius:10px;padding:12px 16px}
+  li{list-style:none;padding:8px 4px;border-bottom:1px solid #eee}
+</style>
+</head>
+<body>
+  <h1>Demo: fake Messenger member list</h1>
+  <p>Click <b>Sync members</b> (bottom left), paste the list below, then press <b>Compare with chat members</b>.</p>
+  <div role="dialog" aria-label="Members">
+    <ul>
+      <li role="listitem"><a href="https://www.facebook.com/profile.php?id=100000000001">Amina Rahman</a></li>
+      <li role="listitem"><a href="https://www.facebook.com/lena.petrova">Lena Petrova</a></li>
+      <li role="listitem"><div>Tomás Rivera</div><div>Member</div></li>
+      <li role="listitem"><div>John Smith</div></li>
+      <li role="listitem"><div>Random Person</div></li>
+    </ul>
+  </div>
+  <p>Try this list (it is also fine to start with a smaller one):</p>
+  <pre>Amina Rahman
+Lena Petrova | facebook.com/lena.petrova
+Tomas Rivera
+Jon Smith
+Priya Nair</pre>
+  <p>Expected: Amina, Lena and Tomas match; <b>Jon Smith</b> is offered as a likely match for John Smith; <b>Priya Nair</b> is to add; <b>Random Person</b> is not on the list.</p>
+  <script src="content.js"></script>
+</body>
+</html>

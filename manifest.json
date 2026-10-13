@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Group Chat Sync Assistant",
+  "version": "0.3.0",
+  "description": "Compare a list of Facebook IDs against a Messenger group chat's members and step through the adds and removals you confirm.",
+  "permissions": ["storage"],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.messenger.com/*",
+        "https://www.facebook.com/messages/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
